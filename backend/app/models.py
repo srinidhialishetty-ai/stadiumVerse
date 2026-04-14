@@ -37,6 +37,32 @@ class RouteResponse(BaseModel):
     estimated_wait_impact: float
     selection_reason: str
     reroute_suggestion: str | None = None
+    emergency: bool = False
+    avoided_zones: list[str] = Field(default_factory=list)
+    severity: str | None = None
+    recommended_exit: str | None = None
+
+
+class DangerZone(BaseModel):
+    node_id: str
+    severity: Literal["moderate", "high", "critical"]
+    congestion_value: float
+
+
+class SeveritySummary(BaseModel):
+    moderate: int = 0
+    high: int = 0
+    critical: int = 0
+
+
+class SimulationSnapshot(BaseModel):
+    phase: str
+    tick: int
+    nodes: list[dict[str, Any]]
+    edges: list[dict[str, Any]]
+    danger_zones: list[DangerZone] = Field(default_factory=list)
+    severity_summary: SeveritySummary = Field(default_factory=SeveritySummary)
+    recommended_exits: list[str] = Field(default_factory=list)
 
 
 class RecommendationItem(BaseModel):

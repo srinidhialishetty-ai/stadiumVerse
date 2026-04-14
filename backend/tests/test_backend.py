@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import json
+
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
 from backend.app.models import AdviceRequest
 from backend.app.services.advice import AdviceService
 from backend.app.services.data_loader import load_graph_data
+from backend.app.services.simulation import SimulationEngine
 from backend.app.services.routing import GraphError, RoutingService
 
 
@@ -76,6 +80,7 @@ def test_api_endpoints():
     graph_response = client.get("/graph")
     assert graph_response.status_code == 200
     assert "nodes" in graph_response.json()
+    assert "danger_zones" in graph_response.json()
 
     route_response = client.get("/route", params={"start": "gate_a", "end": "section_102"})
     assert route_response.status_code == 200
@@ -84,3 +89,54 @@ def test_api_endpoints():
     recommendation_response = client.get("/recommendations", params={"type": "restroom", "from": "section_102"})
     assert recommendation_response.status_code == 200
     assert len(recommendation_response.json()) >= 1
+
+
+def test_simulation_snapshot_includes_emergency_metadata():
+    engine = SimulationEngine()
+    snapshot = asyncio.run(engine.advance())
+
+    assert "danger_zones" in snapshot
+    assert "severity_summary" in snapshot
+    assert "recommended_exits" in snapshot
+    assert set(snapshot["severity_summary"]) == {"moderate", "high", "critical"}
+
+
+def test_emergency_route_avoids_danger_zones():
+    data = load_graph_data()
+    service = RoutingService(data)
+    snapshot = {
+        "nodes": data["nodes"],
+        "edges": data["edges"],
+        "danger_zones": [
+            {"node_id": "concourse_ne", "severity": "critical", "congestion_value": 0.96},
+            {"node_id": "gate_b", "severity": "high", "congestion_value": 0.87},
+        ],
+    }
+    service.refresh(snapshot)
+
+    result = service.emergency_route("section_103")
+
+    assert result["emergency"] is True
+    assert result["recommended_exit"] != "gate_b"
+    assert "concourse_ne" not in result["path"][1:]
+
+
+def test_emergency_route_endpoint_returns_safest_exit():
+    client = TestClient(app)
+    response = client.get("/emergency_route", params={"start": "section_108"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["emergency"] is True
+    assert payload["recommended_exit"] is not None
+    assert payload["path"][-1] == payload["recommended_exit"]
+
+
+def test_simulation_websocket_includes_emergency_payload():
+    client = TestClient(app)
+    with client.websocket_connect("/ws/simulation") as websocket:
+        payload = json.loads(websocket.receive_text())
+
+    assert "danger_zones" in payload
+    assert "severity_summary" in payload
+    assert "recommended_exits" in payload

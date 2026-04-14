@@ -38,6 +38,22 @@ PHASE_CLUMPS = {
     },
 }
 
+DENSITY_THRESHOLDS = {
+    "moderate": 0.55,
+    "high": 0.72,
+    "critical": 0.88,
+}
+
+
+def _severity_for_density(density: float) -> str | None:
+    if density >= DENSITY_THRESHOLDS["critical"]:
+        return "critical"
+    if density >= DENSITY_THRESHOLDS["high"]:
+        return "high"
+    if density >= DENSITY_THRESHOLDS["moderate"]:
+        return "moderate"
+    return None
+
 
 class SimulationEngine:
     def __init__(self) -> None:
@@ -54,12 +70,45 @@ class SimulationEngine:
 
     async def snapshot(self) -> dict:
         async with self._lock:
-            return {
-                "phase": self.current_phase(),
-                "tick": self.tick,
-                "nodes": deepcopy(self.current_graph["nodes"]),
-                "edges": deepcopy(self.current_graph["edges"]),
-            }
+            return self._build_snapshot(self.current_phase())
+
+    def _build_snapshot(self, phase: str) -> dict:
+        danger_zones = []
+        severity_summary = {"moderate": 0, "high": 0, "critical": 0}
+
+        for node in self.current_graph["nodes"]:
+            severity = node.get("severity_level")
+            if not severity:
+                continue
+            danger_zones.append(
+                {
+                    "node_id": node["id"],
+                    "severity": severity,
+                    "congestion_value": node.get("sim_congestion", 0.0),
+                }
+            )
+            severity_summary[severity] += 1
+
+        recommended_exits = [
+            node["id"]
+            for node in sorted(
+                (
+                    node for node in self.current_graph["nodes"]
+                    if node["type"] == "gate" and not node.get("danger_zone", False)
+                ),
+                key=lambda item: (item.get("sim_congestion", 0.0), item.get("sim_wait_time", item["base_wait_time"])),
+            )
+        ]
+
+        return {
+            "phase": phase,
+            "tick": self.tick,
+            "nodes": deepcopy(self.current_graph["nodes"]),
+            "edges": deepcopy(self.current_graph["edges"]),
+            "danger_zones": danger_zones,
+            "severity_summary": severity_summary,
+            "recommended_exits": recommended_exits,
+        }
 
     async def advance(self) -> dict:
         async with self._lock:
@@ -87,6 +136,19 @@ class SimulationEngine:
                 node["sim_wait_time"] = max(0.0, round(base["base_wait_time"] * (1 + boost + neighborhood + pulse), 1))
                 node["sim_congestion"] = min(0.98, max(0.05, round(0.16 + boost + neighborhood + random.uniform(0, 0.16), 2)))
                 node["busyness_percent"] = int(round(node["sim_congestion"] * 100))
+                density = min(
+                    0.99,
+                    round(
+                        node["sim_congestion"] * 0.7
+                        + min(0.28, node["sim_wait_time"] / max(1, base["capacity"])) * 4
+                        + (0.06 if node["type"] == "connector" else 0.0),
+                        2,
+                    ),
+                )
+                severity = _severity_for_density(density)
+                node["crowd_density"] = density
+                node["severity_level"] = severity
+                node["danger_zone"] = severity is not None
 
             for edge in self.current_graph["edges"]:
                 key = tuple(sorted((edge["source"], edge["target"])))
@@ -100,9 +162,4 @@ class SimulationEngine:
                 )
                 edge["heat_percent"] = int(round(edge["congestion"] * 100))
 
-            return {
-                "phase": phase,
-                "tick": self.tick,
-                "nodes": deepcopy(self.current_graph["nodes"]),
-                "edges": deepcopy(self.current_graph["edges"]),
-            }
+            return self._build_snapshot(phase)

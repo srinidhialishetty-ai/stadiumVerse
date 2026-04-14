@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .models import AdviceRequest, AdviceResponse, RecommendationItem, RouteResponse
+from .models import AdviceRequest, AdviceResponse, RecommendationItem, RouteResponse, SimulationSnapshot
 from .services.advice import AdviceService
 from .services.data_loader import load_graph_data
 from .services.routing import GraphError, RoutingService
@@ -51,15 +51,28 @@ app.add_middleware(
 )
 
 
-@app.get("/graph")
+@app.get("/graph", response_model=SimulationSnapshot)
 async def get_graph():
     return await simulation.snapshot()
 
 
 @app.get("/route", response_model=RouteResponse)
-async def get_route(start: str = Query(...), end: str = Query(...), accessible: bool = Query(False)):
+async def get_route(
+    start: str = Query(...),
+    end: str = Query(...),
+    accessible: bool = Query(False),
+    emergency: bool = Query(False),
+):
     try:
-        return router.shortest_path(start, end, accessible)
+        return router.shortest_path(start, end, accessible, emergency=emergency)
+    except GraphError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/emergency_route", response_model=RouteResponse)
+async def get_emergency_route(start: str = Query(...), accessible: bool = Query(False)):
+    try:
+        return router.emergency_route(start, accessible)
     except GraphError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

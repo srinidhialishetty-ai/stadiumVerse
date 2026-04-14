@@ -15,17 +15,38 @@ class RoutingService:
         self.base_edges = [dict(edge) for edge in graph_data["edges"]]
         self.nodes = {node["id"]: node for node in graph_data["nodes"]}
         self.edges = graph_data["edges"]
+        self.safe_exit_ids = [node["id"] for node in graph_data["nodes"] if node["type"] == "gate"]
+        self.danger_zones: dict[str, dict] = {}
+        self._refresh_emergency_state()
 
     def refresh(self, graph_data: dict) -> None:
         self.graph_data = graph_data
         self.nodes = {node["id"]: node for node in graph_data["nodes"]}
         self.edges = graph_data["edges"]
+        self.safe_exit_ids = [node["id"] for node in graph_data["nodes"] if node["type"] == "gate"]
+        self._refresh_emergency_state()
+
+    def _refresh_emergency_state(self) -> None:
+        self.danger_zones = {
+            zone["node_id"]: zone
+            for zone in self.graph_data.get("danger_zones", [])
+        }
+
+    def _node_is_dangerous(self, node_id: str) -> bool:
+        return node_id in self.danger_zones
 
     def _validate_node(self, node_id: str) -> None:
         if node_id not in self.nodes:
             raise GraphError(f"Unknown node '{node_id}'")
 
-    def _adjacency(self, accessible: bool, use_base: bool = False) -> dict[str, list[dict]]:
+    def _adjacency(
+        self,
+        accessible: bool,
+        use_base: bool = False,
+        emergency: bool = False,
+        start: str | None = None,
+        end: str | None = None,
+    ) -> dict[str, list[dict]]:
         graph = defaultdict(list)
         edges = self.base_edges if use_base else self.edges
         for edge in edges:
@@ -35,6 +56,14 @@ class RoutingService:
                 if not self.nodes[edge["source"]].get("accessible", True):
                     continue
                 if not self.nodes[edge["target"]].get("accessible", True):
+                    continue
+            if emergency:
+                blocked_nodes = {
+                    node_id
+                    for node_id in (edge["source"], edge["target"])
+                    if self._node_is_dangerous(node_id) and node_id not in {start, end}
+                }
+                if blocked_nodes:
                     continue
             graph[edge["source"]].append(edge)
             graph[edge["target"]].append(
@@ -48,7 +77,7 @@ class RoutingService:
             )
         return graph
 
-    def _edge_cost(self, edge: dict, end_id: str) -> float:
+    def _edge_cost(self, edge: dict, end_id: str, emergency: bool = False) -> float:
         destination_wait = self.nodes[end_id].get("sim_wait_time", self.nodes[end_id]["base_wait_time"])
         accessibility_penalty = 0.0
         if not edge.get("accessible", True):
@@ -59,15 +88,36 @@ class RoutingService:
             edge_penalty += 18
         if edge["target"] == end_id and self.nodes[end_id]["type"] in {"food", "restroom", "gate"}:
             edge_penalty += destination_wait * 2.1
+        if emergency:
+            target_zone = self.danger_zones.get(edge["target"])
+            source_zone = self.danger_zones.get(edge["source"])
+            severity_weight = {"moderate": 35, "high": 70, "critical": 120}
+            if source_zone:
+                edge_penalty += severity_weight[source_zone["severity"]] * 0.35
+            if target_zone and edge["target"] != end_id:
+                edge_penalty += severity_weight[target_zone["severity"]]
+            if edge["congestion"] >= 0.85:
+                edge_penalty += 120
+            elif edge["congestion"] >= 0.7:
+                edge_penalty += 65
+            elif edge["congestion"] >= 0.55:
+                edge_penalty += 25
         return edge_penalty
 
-    def _run_path(self, start: str, end: str, accessible: bool = False, use_base: bool = False) -> tuple[list[str], float]:
+    def _run_path(
+        self,
+        start: str,
+        end: str,
+        accessible: bool = False,
+        use_base: bool = False,
+        emergency: bool = False,
+    ) -> tuple[list[str], float]:
         self._validate_node(start)
         self._validate_node(end)
         if accessible and not self.nodes[end].get("accessible", True):
             raise GraphError(f"Destination '{end}' is not accessible")
 
-        graph = self._adjacency(accessible, use_base=use_base)
+        graph = self._adjacency(accessible, use_base=use_base, emergency=emergency, start=start, end=end)
         heap = [(0.0, start)]
         costs = {start: 0.0}
         previous: dict[str, str | None] = {start: None}
@@ -79,7 +129,7 @@ class RoutingService:
             if current_cost > costs.get(node_id, inf):
                 continue
             for edge in graph.get(node_id, []):
-                candidate = current_cost + self._edge_cost(edge, end)
+                candidate = current_cost + self._edge_cost(edge, end, emergency=emergency)
                 if candidate < costs.get(edge["target"], inf):
                     costs[edge["target"]] = candidate
                     previous[edge["target"]] = node_id
@@ -97,8 +147,17 @@ class RoutingService:
         path.reverse()
         return path, round(costs.get(end, 0.0), 1)
 
-    def shortest_path(self, start: str, end: str, accessible: bool = False) -> dict:
-        path, effort = self._run_path(start, end, accessible)
+    def _severity_for_path(self, path: list[str]) -> str | None:
+        severity_rank = {"moderate": 1, "high": 2, "critical": 3}
+        highest = None
+        for node_id in path:
+            severity = self.danger_zones.get(node_id, {}).get("severity")
+            if severity and (highest is None or severity_rank[severity] > severity_rank[highest]):
+                highest = severity
+        return highest
+
+    def shortest_path(self, start: str, end: str, accessible: bool = False, emergency: bool = False) -> dict:
+        path, effort = self._run_path(start, end, accessible, emergency=emergency)
         route_edges = self._edges_for_path(path)
         total_distance = round(sum(edge["distance"] for edge in route_edges), 1)
         avg_congestion = round(sum(edge["congestion"] for edge in route_edges) / max(1, len(route_edges)), 2)
@@ -135,6 +194,17 @@ class RoutingService:
             explanation_parts.append(f"is less crowded than the shortest route by roughly {time_saved:.0f} effort-minutes")
         if accessible:
             explanation_parts.append("stays on accessible paths")
+        avoided_zones = sorted(
+            {
+                zone_id
+                for zone_id in self.danger_zones
+                if zone_id not in path
+                and any(zone_id in {edge["source"], edge["target"]} for edge in self.edges)
+            }
+        )
+        if emergency:
+            explanation_parts.append("steers away from active danger zones")
+            explanation_parts.append("prioritizes safer, lower-pressure corridors to an exit")
         selection_reason = ". ".join(part[:1].upper() + part[1:] for part in explanation_parts) + "."
 
         return {
@@ -147,7 +217,38 @@ class RoutingService:
             "estimated_wait_impact": wait_impact,
             "selection_reason": selection_reason,
             "reroute_suggestion": reroute,
+            "emergency": emergency,
+            "avoided_zones": avoided_zones,
+            "severity": self._severity_for_path(path),
+            "recommended_exit": end if emergency and end in self.safe_exit_ids else None,
         }
+
+    def emergency_route(self, start: str, accessible: bool = False) -> dict:
+        self._validate_node(start)
+        candidates = []
+
+        for exit_id in self.safe_exit_ids:
+            if accessible and not self.nodes[exit_id].get("accessible", True):
+                continue
+            if self._node_is_dangerous(exit_id):
+                continue
+            try:
+                route = self.shortest_path(start, exit_id, accessible=accessible, emergency=True)
+            except GraphError:
+                continue
+            score = (
+                route["estimated_total_effort"]
+                + route["average_congestion"] * 80
+                + len(route["avoided_zones"]) * 3
+            )
+            candidates.append((score, route))
+
+        if not candidates:
+            raise GraphError("No safe emergency exit route is currently available")
+
+        best_route = min(candidates, key=lambda item: item[0])[1]
+        best_route["severity"] = best_route["severity"] or self._severity_for_path([start])
+        return best_route
 
     def _edges_for_path(self, path: list[str]) -> list[dict]:
         found = []
