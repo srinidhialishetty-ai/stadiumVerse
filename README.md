@@ -1,122 +1,140 @@
-# StadiumVerse
+# StadiumVerse — Smart Crowd Navigation & Experience Platform
 
-StadiumVerse is a crowd-aware stadium assistance system built to improve the physical event experience for attendees at large sporting venues. It helps people navigate intelligently, avoid congested concourses, reduce waiting times for amenities, and adapt to real-time venue conditions with clear rerouting guidance.
+Live Demo: https://stadiumverse-1094925083449.asia-south1.run.app  
 
-## Problem Statement
+---
 
-Large stadiums create friction during peak moments such as entry, halftime, and exit. Attendees often face bottlenecks at gates and concourses, long lines at food stands and restrooms, confusion while finding seating or amenities, and poor coordination when conditions change in real time.
+## Overview
 
-## How StadiumVerse Solves It
+StadiumVerse is a crowd navigation and experience platform designed to improve movement and decision-making inside large venues such as stadiums.
 
-- Computes crowd-aware routes using distance, congestion, and destination wait impact
-- Recommends better food stands and restrooms using travel effort, queue time, and crowd density
-- Simulates realistic venue phases such as Entry Rush, Early Event, Halftime Spike, and Exit Surge
-- Pushes live updates over WebSocket for dynamic UI refresh and reroute prompts
-- Supports accessible routing by preferring accessible edges and destinations
-- Provides optional Gemini-powered navigation advice with a safe local fallback
+It combines real-time simulation, graph-based routing, and intelligent recommendations to provide users with efficient navigation and contextual suggestions.
 
-## Architecture
-
-- Frontend: React + Vite + React Three Fiber + Three.js
-- Backend: FastAPI + WebSocket simulation loop
-- Data: JSON stadium graph and simulated operational metadata
-- Deployment: single Docker image for Google Cloud Run
+---
 
 ## Features
 
-- Crowd-aware navigation between gates, seating, amenities, and VIP
-- Real-time congestion updates with event phase transitions
-- Food and restroom recommendations that do not rely on wait time alone
-- Accessible mode routing
-- Guided route progression that runs once and stops at the destination
-- Readable labels and consistent visual mappings by node type
-- AI advice with Gemini when configured, local fallback otherwise
+### Smart Route Navigation
+- Computes shortest paths between locations  
+- Supports accessibility-aware routing  
 
-## Repository Structure
+### Real-Time Simulation
+- Continuously updates crowd conditions  
+- Routes adapt dynamically based on simulation  
 
-```text
-backend/
-  app/
-    data/
-    services/
-  tests/
-frontend/
-  src/
-Dockerfile
-README.md
-requirements.txt
-```
+### Location-Based Recommendations
+- Suggests nearby food stalls and restrooms  
+- Considers user location and accessibility preferences  
+
+### AI-Based Advice System
+- Generates structured recommendations for users  
+- Enhances in-venue decision making  
+
+### Live Updates
+- WebSocket-based streaming for real-time data  
+- Keeps frontend synchronized with backend state  
+
+### Full Stack Integration
+- Backend serves both API and frontend assets  
+- Seamless deployment as a single service  
+
+---
+
+## Tech Stack
+
+**Backend**
+- FastAPI  
+- WebSockets  
+- Graph-based routing logic  
+- Custom simulation engine  
+
+**Frontend**
+- Vite  
+
+**Deployment**
+- Docker (multi-stage build)  
+- Google Cloud Run  
+- Cloud Build (CI/CD)  
+
+---
+
+## Project Structure
+
+StadiumVerse/
+│
+├── backend/  
+│   ├── app/  
+│   │   ├── main.py  
+│   │   ├── models/  
+│   │   └── services/  
+│   │       ├── routing.py  
+│   │       ├── simulation.py  
+│   │       └── advice.py  
+│
+├── frontend/  
+│   ├── src/  
+│   └── dist/  
+│
+├── Dockerfile  
+├── requirements.txt  
+└── README.md  
+
+---
 
 ## Local Setup
 
-### Backend
+### Clone the repository
+git clone https://github.com/srinidhialishetty-ai/stadiumVerse.git  
+cd stadiumVerse  
 
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python -m uvicorn backend.app.main:app --reload
-```
+### Backend
+pip install -r requirements.txt  
+uvicorn backend.app.main:app --reload  
 
 ### Frontend
+cd frontend  
+npm install  
+npm run dev  
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+---
 
-The frontend expects the backend at `http://localhost:8000` during development.
+## Docker
 
-Python 3.12+ is recommended locally. The included Docker deployment uses Python 3.12 for consistent Cloud Run behavior.
+docker build -t stadiumverse .  
+docker run -p 8080:8080 stadiumverse  
 
-## Production Build
+---
 
-```bash
-cd frontend
-npm install
-npm run build
-cd ..
-python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
-```
+## Deployment
 
-FastAPI serves `frontend/dist` automatically when the frontend is built.
+- Deployed on Google Cloud Run  
+- Automated builds using Cloud Build  
+- Multi-stage Docker build for optimized deployment  
 
-## Environment Variables
+---
 
-- `GEMINI_API_KEY`: optional Gemini API key for short AI-generated advice
-- `PORT`: Cloud Run port binding, defaults to `8000`
+## Problem Statement
 
-## Deployment To Cloud Run
+Large venues often lack efficient navigation systems, leading to congestion and poor user experience.
 
-1. Build the image:
+This project addresses:
+- Inefficient movement inside venues  
+- Lack of real-time routing  
+- Limited contextual assistance for users  
 
-```bash
-gcloud builds submit --tag gcr.io/PROJECT_ID/stadiumverse
-```
+---
 
-2. Deploy:
+## Future Scope
 
-```bash
-gcloud run deploy stadiumverse \
-  --image gcr.io/PROJECT_ID/stadiumverse \
-  --platform managed \
-  --region us-central1 \
-  --allow-unauthenticated
-```
+- Mobile application support  
+- Crowd density heatmaps  
+- Advanced AI-based recommendations  
+- Multi-venue scalability  
 
-3. Set optional Gemini key:
+---
 
-```bash
-gcloud run services update stadiumverse \
-  --set-env-vars GEMINI_API_KEY=your_key_here \
-  --region us-central1
-```
+## Author
 
-## Assumptions
+Srinidhi Alishetty  
 
-- Congestion and wait data are simulated for demo readiness rather than sourced from venue telemetry
-- The prototype focuses on a single stylized stadium model and one event timeline
-- Accessible routing uses graph metadata and edge accessibility rather than detailed indoor mapping constraints
-- Gemini advice is optional enhancement only; fallback messaging is always available
+---
