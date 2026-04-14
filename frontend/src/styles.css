@@ -242,6 +242,47 @@ select,
   border: 1px solid rgba(72, 221, 255, 0.15);
 }
 
+.scene-legend {
+  position: absolute;
+  z-index: 10;
+  inset: 18px 18px auto auto;
+  min-width: 190px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  background: rgba(5, 14, 26, 0.76);
+  border: 1px solid rgba(72, 221, 255, 0.15);
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  font-size: 0.88rem;
+}
+
+.swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  box-shadow: 0 0 16px currentColor;
+}
+
+.swatch.clear {
+  color: #5cff9f;
+  background: #5cff9f;
+}
+
+.swatch.moderate {
+  color: #ffd65c;
+  background: #ffd65c;
+}
+
+.swatch.busy {
+  color: #ff6a6a;
+  background: #ff6a6a;
+}
+
 .scene-label {
   min-width: 110px;
   padding: 8px 12px;

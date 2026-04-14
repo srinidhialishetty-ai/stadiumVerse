@@ -1,4 +1,4 @@
-import React, { Suspense, useEffect, useMemo, useState } from 'react'
+import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { Billboard, Html, OrbitControls, RoundedBox, Tube, useTexture } from '@react-three/drei'
 import * as THREE from 'three'
@@ -46,6 +46,16 @@ const continuousSeatBands = [
   { key: 'upper-ring', start: -0.98, end: 4.12, radius: 48.8, rows: 5, rowDepth: 1.95, seatsPerRow: 98, baseY: 15.2, centerX: 0, centerZ: 0 }
 ]
 
+function mixColors(a, b, weight = 0.5) {
+  return new THREE.Color(a).lerp(new THREE.Color(b), weight).getStyle()
+}
+
+function heatColor(value = 0) {
+  if (value < 0.34) return '#5cff9f'
+  if (value < 0.67) return '#ffd65c'
+  return '#ff6a6a'
+}
+
 function interpolateRoute(points, progress) {
   if (points.length < 2) return points[0] || [0, 0, 0]
   const curve = new THREE.CatmullRomCurve3(points.map((point) => new THREE.Vector3(...point)))
@@ -80,6 +90,16 @@ function generateSectionSeats(config) {
   return seats
 }
 
+function edgeTransform(source, target) {
+  const start = new THREE.Vector3(...source)
+  const end = new THREE.Vector3(...target)
+  const midpoint = start.clone().lerp(end, 0.5)
+  const direction = end.clone().sub(start)
+  const length = direction.length()
+  const angle = Math.atan2(direction.z, direction.x)
+  return { midpoint, length, angle }
+}
+
 function Label({ text, position, variant = 'default', distanceFactor = 14 }) {
   return (
     <Billboard follow lockX={false} lockY={false} lockZ={false} position={position}>
@@ -90,30 +110,43 @@ function Label({ text, position, variant = 'default', distanceFactor = 14 }) {
   )
 }
 
-function StadiumSeat({ position, rotation, highlighted }) {
+function StadiumSeat({ position, rotation, highlighted, dimmed }) {
+  const baseOpacity = dimmed ? 0.18 : 0.96
   return (
     <group position={position} rotation={[0, rotation, 0]}>
       <mesh position={[0, 0.22, -0.16]}>
         <boxGeometry args={[0.56, 0.14, 0.62]} />
-        <meshStandardMaterial color={highlighted ? '#d7f8ff' : '#87aef8'} emissive={highlighted ? '#8ff2ff' : '#2f4f91'} emissiveIntensity={highlighted ? 0.9 : 0.18} />
+        <meshStandardMaterial
+          color={highlighted ? '#d7f8ff' : '#87aef8'}
+          emissive={highlighted ? '#8ff2ff' : '#2f4f91'}
+          emissiveIntensity={highlighted ? 0.9 : 0.18}
+          transparent
+          opacity={baseOpacity}
+        />
       </mesh>
       <mesh position={[0, 0.58, -0.36]}>
         <boxGeometry args={[0.56, 0.54, 0.12]} />
-        <meshStandardMaterial color={highlighted ? '#b9f2ff' : '#769ce8'} emissive={highlighted ? '#7eeaff' : '#234684'} emissiveIntensity={highlighted ? 0.75 : 0.16} />
+        <meshStandardMaterial
+          color={highlighted ? '#b9f2ff' : '#769ce8'}
+          emissive={highlighted ? '#7eeaff' : '#234684'}
+          emissiveIntensity={highlighted ? 0.75 : 0.16}
+          transparent
+          opacity={baseOpacity}
+        />
       </mesh>
       <mesh position={[-0.2, 0.1, -0.16]}>
         <boxGeometry args={[0.06, 0.24, 0.06]} />
-        <meshStandardMaterial color="#5a6e8f" />
+        <meshStandardMaterial color="#5a6e8f" transparent opacity={dimmed ? 0.14 : 0.9} />
       </mesh>
       <mesh position={[0.2, 0.1, -0.16]}>
         <boxGeometry args={[0.06, 0.24, 0.06]} />
-        <meshStandardMaterial color="#5a6e8f" />
+        <meshStandardMaterial color="#5a6e8f" transparent opacity={dimmed ? 0.14 : 0.9} />
       </mesh>
     </group>
   )
 }
 
-function ImagePanel({ node, routeActive }) {
+function ImagePanel({ node, routeActive, dimmed }) {
   const texture = useTexture(imageByType[node.type])
   if (!texture) return null
 
@@ -133,22 +166,22 @@ function ImagePanel({ node, routeActive }) {
       <group>
         <mesh position={[0, 0, -0.08]}>
           <planeGeometry args={[width + 0.5, height + 0.5]} />
-          <meshBasicMaterial color={routeActive ? '#dffcff' : '#0f1c2f'} transparent opacity={0.95} toneMapped={false} />
+          <meshBasicMaterial color={routeActive ? '#dffcff' : '#0f1c2f'} transparent opacity={dimmed ? 0.25 : 0.95} toneMapped={false} />
         </mesh>
         <mesh>
           <planeGeometry args={[width, height]} />
-          <meshBasicMaterial map={texture} toneMapped={false} side={THREE.DoubleSide} />
+          <meshBasicMaterial map={texture} toneMapped={false} side={THREE.DoubleSide} transparent opacity={dimmed ? 0.25 : 1} />
         </mesh>
         <mesh rotation={[0, Math.PI, 0]}>
           <planeGeometry args={[width, height]} />
-          <meshBasicMaterial map={texture} toneMapped={false} side={THREE.DoubleSide} />
+          <meshBasicMaterial map={texture} toneMapped={false} side={THREE.DoubleSide} transparent opacity={dimmed ? 0.25 : 1} />
         </mesh>
       </group>
     </Billboard>
   )
 }
 
-function ZoneImagePanel({ imageType, position, width = 9.4, height = 5.8 }) {
+function ZoneImagePanel({ imageType, position, width = 9.4, height = 5.8, dimmed = false }) {
   const texture = useTexture(imageByType[imageType])
   if (!texture) return null
 
@@ -160,31 +193,40 @@ function ZoneImagePanel({ imageType, position, width = 9.4, height = 5.8 }) {
       <group>
         <mesh position={[0, 0, -0.08]}>
           <planeGeometry args={[width + 0.45, height + 0.45]} />
-          <meshBasicMaterial color="#0d1a2d" transparent opacity={0.95} toneMapped={false} />
+          <meshBasicMaterial color="#0d1a2d" transparent opacity={dimmed ? 0.22 : 0.95} toneMapped={false} />
         </mesh>
         <mesh>
           <planeGeometry args={[width, height]} />
-          <meshBasicMaterial map={texture} toneMapped={false} side={THREE.DoubleSide} />
+          <meshBasicMaterial map={texture} toneMapped={false} side={THREE.DoubleSide} transparent opacity={dimmed ? 0.22 : 1} />
         </mesh>
         <mesh rotation={[0, Math.PI, 0]}>
           <planeGeometry args={[width, height]} />
-          <meshBasicMaterial map={texture} toneMapped={false} side={THREE.DoubleSide} />
+          <meshBasicMaterial map={texture} toneMapped={false} side={THREE.DoubleSide} transparent opacity={dimmed ? 0.22 : 1} />
         </mesh>
       </group>
     </Billboard>
   )
 }
 
-function RouteMarker({ routePoints, guidedMode }) {
+function RouteMarker({ routePoints, guidedMode, onComplete }) {
   const [progress, setProgress] = useState(0)
+  const completedRef = useRef(false)
 
   useEffect(() => {
     setProgress(0)
-  }, [routePoints])
+    completedRef.current = false
+  }, [routePoints, guidedMode])
 
   useFrame((_, delta) => {
-    if (!guidedMode || routePoints.length < 2) return
-    setProgress((current) => Math.min(1, current + delta * 0.15))
+    if (!guidedMode || routePoints.length < 2 || completedRef.current) return
+    setProgress((current) => {
+      const next = Math.min(1, current + delta * 0.15)
+      if (next >= 1 && !completedRef.current) {
+        completedRef.current = true
+        onComplete?.()
+      }
+      return next
+    })
   })
 
   if (!routePoints.length) return null
@@ -197,11 +239,29 @@ function RouteMarker({ routePoints, guidedMode }) {
   )
 }
 
-function StadiumModel({ nodes, routeIds, accessibleHighlights, guidedMode }) {
+function StadiumModel({
+  nodes,
+  edges,
+  routeIds,
+  accessibleHighlights,
+  guidedMode,
+  startId,
+  endId,
+  onGuidanceComplete
+}) {
   const routeLookup = useMemo(() => new Set(routeIds), [routeIds])
+  const importantLookup = useMemo(() => new Set([startId, endId, ...routeIds]), [startId, endId, routeIds])
+  const nodeLookup = useMemo(() => Object.fromEntries(nodes.map((node) => [node.id, node])), [nodes])
+  const routeEdgeLookup = useMemo(
+    () =>
+      new Set(
+        routeIds.slice(0, -1).map((nodeId, index) => [nodeId, routeIds[index + 1]].sort().join('|'))
+      ),
+    [routeIds]
+  )
   const routePoints = useMemo(
-    () => routeIds.map((id) => nodes.find((node) => node.id === id)?.position).filter(Boolean),
-    [nodes, routeIds]
+    () => routeIds.map((id) => nodeLookup[id]?.position).filter(Boolean),
+    [nodeLookup, routeIds]
   )
   const routeCurve = useMemo(() => {
     if (routePoints.length < 2) return null
@@ -250,14 +310,33 @@ function StadiumModel({ nodes, routeIds, accessibleHighlights, guidedMode }) {
         <torusGeometry args={[32, 7, 16, 90]} />
         <meshStandardMaterial color="#11274a" emissive="#1e4f86" emissiveIntensity={0.45} transparent opacity={0.8} />
       </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 2.8, 0]}>
-        <ringGeometry args={[40.5, 42.2, 100]} />
-        <meshStandardMaterial color="#71819b" emissive="#6dc8ff" emissiveIntensity={0.08} side={THREE.DoubleSide} />
-      </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 8.8, 0]}>
-        <ringGeometry args={[45.4, 47.1, 100]} />
-        <meshStandardMaterial color="#71819b" emissive="#6dc8ff" emissiveIntensity={0.08} side={THREE.DoubleSide} />
-      </mesh>
+
+      {edges.map((edge, index) => {
+        const source = nodeLookup[edge.source]
+        const target = nodeLookup[edge.target]
+        if (!source || !target) return null
+        const routeKey = [edge.source, edge.target].sort().join('|')
+        const onRoute = routeEdgeLookup.has(routeKey)
+        const heat = edge.congestion ?? 0
+        const { midpoint, length, angle } = edgeTransform(source.position, target.position)
+        return (
+          <mesh
+            key={`${routeKey}-${index}`}
+            position={[midpoint.x, 0.35, midpoint.z]}
+            rotation={[-Math.PI / 2, 0, angle]}
+            renderOrder={onRoute ? 10 : 2}
+          >
+            <planeGeometry args={[length, onRoute ? 2.3 : 1.5]} />
+            <meshBasicMaterial
+              color={onRoute ? mixColors('#a5f3ff', heatColor(heat), 0.2) : heatColor(heat)}
+              transparent
+              opacity={guidedMode ? (onRoute ? 0.88 : 0.16) : (onRoute ? 0.78 : 0.42)}
+              toneMapped={false}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+        )
+      })}
 
       {gateShellPositions.map((position, index) => (
         <group key={index} position={position}>
@@ -286,7 +365,7 @@ function StadiumModel({ nodes, routeIds, accessibleHighlights, guidedMode }) {
         return (
           <mesh key={`rail-${index}`} position={[Math.cos(angle) * radius, y, Math.sin(angle) * radius]} rotation={[0, -angle, 0]}>
             <boxGeometry args={[3.2, 0.18, 0.18]} />
-            <meshStandardMaterial color="#b8c5d7" emissive="#68ddff" emissiveIntensity={0.08} />
+            <meshStandardMaterial color="#b8c5d7" emissive="#68ddff" emissiveIntensity={0.08} transparent opacity={guidedMode ? 0.28 : 0.92} />
           </mesh>
         )
       })}
@@ -299,106 +378,133 @@ function StadiumModel({ nodes, routeIds, accessibleHighlights, guidedMode }) {
               position={seat.position}
               rotation={seat.rotation}
               highlighted={false}
+              dimmed={guidedMode}
             />
           ))}
           <mesh position={[0, 3.6 + bandIndex * 5.55, 0]}>
             <torusGeometry args={[31.8 + bandIndex * 8.7, 0.28, 12, 120, 5.22]} />
-            <meshStandardMaterial color="#294563" emissive="#14345a" emissiveIntensity={0.14} />
+            <meshStandardMaterial color="#294563" emissive="#14345a" emissiveIntensity={0.14} transparent opacity={guidedMode ? 0.22 : 0.8} />
           </mesh>
         </group>
       ))}
 
-      {seatLayouts.map(({ node, seats }) => (
-        <group key={node.id}>
-          {seats.map((seat, index) => (
-            <StadiumSeat
-              key={`${node.id}-${index}`}
-              position={seat.position}
-              rotation={seat.rotation}
-              highlighted={routeLookup.has(node.id) || accessibleHighlights.has(node.id)}
+      {seatLayouts.map(({ node, seats }) => {
+        const highlighted = routeLookup.has(node.id) || accessibleHighlights.has(node.id) || node.id === endId
+        const dimmed = guidedMode && !highlighted
+        return (
+          <group key={node.id}>
+            {seats.map((seat, index) => (
+              <StadiumSeat
+                key={`${node.id}-${index}`}
+                position={seat.position}
+                rotation={seat.rotation}
+                highlighted={highlighted}
+                dimmed={dimmed}
+              />
+            ))}
+            <mesh position={[node.position[0], node.position[1] - 0.45, node.position[2]]} rotation={[0, -Math.atan2(node.position[2], node.position[0]) + Math.PI / 2, 0]}>
+              <boxGeometry args={[7.4, 0.3, 4.8]} />
+              <meshStandardMaterial color="#2f446b" emissive="#133356" emissiveIntensity={0.18} transparent opacity={dimmed ? 0.24 : 0.95} />
+            </mesh>
+            <Label text={node.label} position={[node.position[0], node.position[1] + sectionLabelYOffset(node), node.position[2]]} variant={highlighted ? 'active' : 'section'} distanceFactor={12} />
+          </group>
+        )
+      })}
+
+      <ZoneImagePanel imageType="seat" position={[-22, 15.5, 26]} width={8.5} height={5.2} dimmed={guidedMode} />
+      <ZoneImagePanel imageType="seat" position={[22, 15.5, -26]} width={8.5} height={5.2} dimmed={guidedMode} />
+
+      {gateNodes.map((node) => {
+        const heat = node.sim_congestion ?? 0
+        const highlighted = importantLookup.has(node.id)
+        const dimmed = guidedMode && !highlighted
+        return (
+          <group key={node.id}>
+            <mesh position={node.position}>
+              <cylinderGeometry args={[2.9, 2.9, 0.9, 18]} />
+              <meshStandardMaterial
+                color={mixColors(colorsByType.gate, heatColor(heat), 0.55)}
+                emissive={highlighted ? '#dffcff' : heatColor(heat)}
+                emissiveIntensity={highlighted ? 1.2 : 0.38}
+                transparent
+                opacity={dimmed ? 0.22 : 0.85}
+              />
+            </mesh>
+            <Label
+              text={node.label}
+              position={[node.position[0], node.position[1] + 5.3, node.position[2]]}
+              variant={highlighted ? 'active' : 'major'}
+              distanceFactor={15}
             />
-          ))}
-          <mesh position={[node.position[0], node.position[1] - 0.45, node.position[2]]} rotation={[0, -Math.atan2(node.position[2], node.position[0]) + Math.PI / 2, 0]}>
-            <boxGeometry args={[7.4, 0.3, 4.8]} />
-            <meshStandardMaterial color="#2f446b" emissive="#133356" emissiveIntensity={0.18} />
-          </mesh>
-          <Label text={node.label} position={[node.position[0], node.position[1] + sectionLabelYOffset(node), node.position[2]]} variant="section" distanceFactor={12} />
-        </group>
-      ))}
+          </group>
+        )
+      })}
 
-      <ZoneImagePanel imageType="seat" position={[-22, 15.5, 26]} width={8.5} height={5.2} />
-      <ZoneImagePanel imageType="seat" position={[22, 15.5, -26]} width={8.5} height={5.2} />
-
-      {gateNodes.map((node) => (
-        <Label
-          key={node.id}
-          text={node.label}
-          position={[node.position[0], node.position[1] + 5.3, node.position[2]]}
-          variant={routeLookup.has(node.id) ? 'active' : 'major'}
-          distanceFactor={15}
-        />
-      ))}
-
-      {amenityNodes.map((node) => (
-        <group key={node.id} position={node.position}>
-          <RoundedBox args={[5.6, node.type === 'vip' ? 4.2 : 3.3, 4.8]} radius={0.35}>
-            <meshStandardMaterial
-              color={colorsByType[node.type]}
-              emissive={routeLookup.has(node.id) ? '#ffffff' : colorsByType[node.type]}
-              emissiveIntensity={routeLookup.has(node.id) ? 1.1 : 0.38}
-              transparent
-              opacity={0.9}
+      {amenityNodes.map((node) => {
+        const heat = node.sim_congestion ?? 0
+        const highlighted = importantLookup.has(node.id)
+        const dimmed = guidedMode && !highlighted
+        return (
+          <group key={node.id} position={node.position}>
+            <RoundedBox args={[5.6, node.type === 'vip' ? 4.2 : 3.3, 4.8]} radius={0.35}>
+              <meshStandardMaterial
+                color={mixColors(colorsByType[node.type], heatColor(heat), 0.35)}
+                emissive={highlighted ? '#ffffff' : heatColor(heat)}
+                emissiveIntensity={highlighted ? 1.1 : 0.32}
+                transparent
+                opacity={dimmed ? 0.22 : 0.9}
+              />
+            </RoundedBox>
+            {node.type === 'food' && (
+              <>
+                <mesh position={[0, 0.6, 2.55]}>
+                  <boxGeometry args={[5.1, 1.1, 0.5]} />
+                  <meshStandardMaterial color="#dbe8f9" emissive="#91ebff" emissiveIntensity={0.12} transparent opacity={dimmed ? 0.22 : 0.95} />
+                </mesh>
+                <mesh position={[0, 2.3, 0]}>
+                  <boxGeometry args={[5.9, 0.3, 4.9]} />
+                  <meshStandardMaterial color="#1f2f49" transparent opacity={dimmed ? 0.2 : 1} />
+                </mesh>
+              </>
+            )}
+            {node.type === 'restroom' && (
+              <>
+                <mesh position={[-1.2, 0.1, 2.5]}>
+                  <boxGeometry args={[1.2, 2.6, 0.25]} />
+                  <meshStandardMaterial color="#b2c3d8" transparent opacity={dimmed ? 0.22 : 0.95} />
+                </mesh>
+                <mesh position={[1.2, 0.1, 2.5]}>
+                  <boxGeometry args={[1.2, 2.6, 0.25]} />
+                  <meshStandardMaterial color="#b2c3d8" transparent opacity={dimmed ? 0.22 : 0.95} />
+                </mesh>
+              </>
+            )}
+            {node.type === 'vip' && (
+              <>
+                <mesh position={[0, 1.4, 0]}>
+                  <boxGeometry args={[4.4, 0.18, 3.7]} />
+                  <meshStandardMaterial color="#59431f" transparent opacity={dimmed ? 0.22 : 0.96} />
+                </mesh>
+                <mesh position={[-1.2, 0.55, 0.8]}>
+                  <boxGeometry args={[0.9, 0.6, 0.9]} />
+                  <meshStandardMaterial color="#dec6a0" transparent opacity={dimmed ? 0.22 : 0.96} />
+                </mesh>
+                <mesh position={[1.2, 0.55, 0.8]}>
+                  <boxGeometry args={[0.9, 0.6, 0.9]} />
+                  <meshStandardMaterial color="#dec6a0" transparent opacity={dimmed ? 0.22 : 0.96} />
+                </mesh>
+              </>
+            )}
+            <ImagePanel node={node} routeActive={highlighted} dimmed={dimmed} />
+            <Label
+              text={node.label}
+              position={[0, amenityPanelOffset(node.type) + (node.type === 'vip' ? 3.2 : 2.7), 0]}
+              variant={highlighted ? 'active' : 'major'}
+              distanceFactor={15}
             />
-          </RoundedBox>
-          {node.type === 'food' && (
-            <>
-              <mesh position={[0, 0.6, 2.55]}>
-                <boxGeometry args={[5.1, 1.1, 0.5]} />
-                <meshStandardMaterial color="#dbe8f9" emissive="#91ebff" emissiveIntensity={0.12} />
-              </mesh>
-              <mesh position={[0, 2.3, 0]}>
-                <boxGeometry args={[5.9, 0.3, 4.9]} />
-                <meshStandardMaterial color="#1f2f49" />
-              </mesh>
-            </>
-          )}
-          {node.type === 'restroom' && (
-            <>
-              <mesh position={[-1.2, 0.1, 2.5]}>
-                <boxGeometry args={[1.2, 2.6, 0.25]} />
-                <meshStandardMaterial color="#b2c3d8" />
-              </mesh>
-              <mesh position={[1.2, 0.1, 2.5]}>
-                <boxGeometry args={[1.2, 2.6, 0.25]} />
-                <meshStandardMaterial color="#b2c3d8" />
-              </mesh>
-            </>
-          )}
-          {node.type === 'vip' && (
-            <>
-              <mesh position={[0, 1.4, 0]}>
-                <boxGeometry args={[4.4, 0.18, 3.7]} />
-                <meshStandardMaterial color="#59431f" />
-              </mesh>
-              <mesh position={[-1.2, 0.55, 0.8]}>
-                <boxGeometry args={[0.9, 0.6, 0.9]} />
-                <meshStandardMaterial color="#dec6a0" />
-              </mesh>
-              <mesh position={[1.2, 0.55, 0.8]}>
-                <boxGeometry args={[0.9, 0.6, 0.9]} />
-                <meshStandardMaterial color="#dec6a0" />
-              </mesh>
-            </>
-          )}
-          <ImagePanel node={node} routeActive={routeLookup.has(node.id)} />
-          <Label
-            text={node.label}
-            position={[0, amenityPanelOffset(node.type) + (node.type === 'vip' ? 3.2 : 2.7), 0]}
-            variant={routeLookup.has(node.id) ? 'active' : 'major'}
-            distanceFactor={15}
-          />
-        </group>
-      ))}
+          </group>
+        )
+      })}
 
       <Label text="Stadium Seats" position={[0, 16, 26]} variant="zone" distanceFactor={18} />
       <Label text="Food Stand" position={[0, 10.5, 33]} variant="zone" distanceFactor={17} />
@@ -406,17 +512,27 @@ function StadiumModel({ nodes, routeIds, accessibleHighlights, guidedMode }) {
       <Label text="VIP Lounge" position={[0, 13.4, -2]} variant="zone vip-zone" distanceFactor={18} />
 
       {routeCurve && (
-        <Tube args={[routeCurve, 64, 0.6, 12, false]} renderOrder={15}>
+        <Tube args={[routeCurve, 64, 0.7, 12, false]} renderOrder={15}>
           <meshBasicMaterial color="#a5f3ff" transparent opacity={0.98} toneMapped={false} />
         </Tube>
       )}
 
-      <RouteMarker routePoints={routePoints} guidedMode={guidedMode} />
+      <RouteMarker routePoints={routePoints} guidedMode={guidedMode} onComplete={onGuidanceComplete} />
     </group>
   )
 }
 
-export default function StadiumScene({ nodes, route, accessible }) {
+export default function StadiumScene({
+  nodes,
+  edges,
+  route,
+  accessible,
+  guidedMode,
+  phase,
+  startId,
+  endId,
+  onGuidanceComplete
+}) {
   const accessibleHighlights = useMemo(
     () => new Set(nodes.filter((node) => accessible && node.accessible && node.type !== 'connector').map((node) => node.id)),
     [nodes, accessible]
@@ -429,15 +545,26 @@ export default function StadiumScene({ nodes, route, accessible }) {
           <span className="overlay-label">Live Venue Twin</span>
           <h2>Guided Stadium Scene</h2>
         </div>
-        <p>The route becomes a glowing floor path. Orbit, pan, and zoom stay fully in your control.</p>
+        <p>The route becomes a glowing floor path while live crowd heat reveals the easiest way through the venue.</p>
+      </div>
+      <div className="scene-legend glass">
+        <span className="overlay-label">{phase}</span>
+        <div className="legend-row"><span className="swatch clear" /> Clear</div>
+        <div className="legend-row"><span className="swatch moderate" /> Moderate</div>
+        <div className="legend-row"><span className="swatch busy" /> Heavy</div>
+        <p>{guidedMode ? 'Focus mode is active. Non-route zones are dimmed.' : 'Explore freely, then start guided mode when ready.'}</p>
       </div>
       <Canvas camera={{ position: [0, 55, 78], fov: 42 }}>
         <Suspense fallback={null}>
           <StadiumModel
             nodes={nodes}
+            edges={edges}
             routeIds={route?.path || []}
             accessibleHighlights={accessibleHighlights}
-            guidedMode={Boolean(route?.path?.length)}
+            guidedMode={guidedMode}
+            startId={startId}
+            endId={endId}
+            onGuidanceComplete={onGuidanceComplete}
           />
         </Suspense>
         <OrbitControls enablePan enableZoom enableRotate maxPolarAngle={Math.PI / 2.1} minDistance={40} maxDistance={120} />

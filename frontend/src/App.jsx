@@ -77,6 +77,11 @@ export default function App() {
     }
   }
 
+  function handleGuidanceComplete() {
+    setGuidedMode(false)
+    setAlerts((current) => ['Guided navigation complete. You have arrived at your destination.', ...current].slice(0, 4))
+  }
+
   useEffect(() => {
     let socket
     fetchGraph().then((data) => {
@@ -99,7 +104,7 @@ export default function App() {
       const shouldAutoReroute = guidedMode && graph.tick !== lastAutoRerouteTick
       refreshRoute(selectedStart, selectedEnd, accessible, { auto: shouldAutoReroute })
     }
-  }, [graph.tick])
+  }, [graph.nodes.length, graph.tick])
 
   return (
     <main className="app-shell">
@@ -133,7 +138,17 @@ export default function App() {
             so attendees can move confidently without walking into the busiest choke points.
           </p>
         </div>
-        <StadiumScene nodes={graph.nodes} route={route} accessible={accessible} />
+        <StadiumScene
+          nodes={graph.nodes}
+          edges={graph.edges}
+          route={route}
+          accessible={accessible}
+          guidedMode={guidedMode}
+          phase={graph.phase}
+          startId={selectedStart}
+          endId={selectedEnd}
+          onGuidanceComplete={handleGuidanceComplete}
+        />
       </section>
     </main>
   )
